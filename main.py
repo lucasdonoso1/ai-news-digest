@@ -4,8 +4,8 @@ from fastapi import FastAPI, HTTPException
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
-import aiohttp
-import bs4
+import requests
+from bs4 import BeautifulSoup
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -26,30 +26,36 @@ AI_NEWS_SOURCES = [
     {"url": "https://www.theverge.com/ai-artificial-intelligence", "selector": "article"}
 ]
 
-async def scrape_news():
+def scrape_news():
     articles = []
-    async with aiohttp.ClientSession() as session:
-        for source in AI_NEWS_SOURCES:
-            try:
-                async with session.get(source["url"]) as response:
-                    if response.status == 200:
-                        html = await response.text()
-                        soup = bs4.BeautifulSoup(html, 'html.parser')
-                        for article in soup.select(source["selector"])[:3]:
-                            title = article.find(['h1', 'h2', 'h3'])
-                            if title:
-                                articles.append({
-                                    'title': title.text.strip(),
-                                    'source': source["url"]
-                                })
-                                logger.info(f"Found article: {title.text.strip()}")
-            except Exception as e:
-                logger.error(f"Error scraping {source['url']}: {str(e)}")
+    for source in AI_NEWS_SOURCES:
+        try:
+            logger.info(f"Scraping: {source['url']}")
+            response = requests.get(source["url"])
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                found_articles = soup.select(source["selector"])
+                logger.info(f"Found {len(found_articles)} articles from {source['url']}")
+                
+                for article in found_articles[:3]:
+                    title = article.find(['h1', 'h2', 'h3'])
+                    if title:
+                        title_text = title.text.strip()
+                        articles.append({
+                            'title': title_text,
+                            'source': source["url"]
+                        })
+                        logger.info(f"Found article: {title_text}")
+            else:
+                logger.error(f"Error: Status code {response.status_code} from {source['url']}")
+        except Exception as e:
+            logger.error(f"Error scraping {source['url']}: {str(e)}")
+    
     return articles
 
-async def send_digest_email(recipient_email: str):
+def send_digest_email(recipient_email: str):
     try:
-        articles = await scrape_news()
+        articles = scrape_news()
         
         if not articles:
             logger.warning("No articles found to send")
@@ -117,7 +123,7 @@ async def test_digest():
         if not recipient_email:
             raise HTTPException(status_code=500, detail="RECIPIENT_EMAIL not set")
         
-        await send_digest_email(recipient_email)
+        send_digest_email(recipient_email)
         return {
             "status": "success",
             "message": f"Test digest email sent to {recipient_email}",
